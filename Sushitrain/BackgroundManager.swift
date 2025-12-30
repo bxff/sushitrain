@@ -367,6 +367,11 @@ enum ContinuedTaskType {
 				Log.info(
 					"Start background sync, time remaining = \(UIApplication.shared.backgroundTimeRemaining)"
 				)
+				
+				// Run native delta scan to detect changes before waking Syncthing
+				let nativeChanges = self.runNativeDeltaScan(timeout: 10.0)
+				Log.info("[NativeScanner] Total changes detected: \(nativeChanges)")
+				
 				await self.appState.suspend(false)
 				currentRun = BackgroundSyncRun(started: start, ended: nil, taskType: taskType)
 				self.lastBackgroundSyncRun = currentRun
@@ -600,6 +605,34 @@ enum ContinuedTaskType {
 				runs.append(run)
 			}
 			self.backgroundSyncRuns = runs
+		}
+		
+		/// Run native delta scanner on all folders to detect changes using fast iOS APIs
+		/// Returns the total number of changes detected across all folders
+		private func runNativeDeltaScan(timeout: TimeInterval = 10.0) -> Int {
+			var totalChanges = 0
+			for folder in appState.folders() {
+				guard let folderURL = folder.localNativeURL else { continue }
+				let detector = FolderChangeDetector(folderID: folder.folderID, folderURL: folderURL, folder: folder)
+				let result = detector.scan(timeout: timeout)
+				
+				switch result {
+				case .completed(let changes, let deleted):
+					let allChanges = changes + deleted
+					Log.info("[NativeScanner] \(folder.folderID): \(allChanges.count) changes")
+					totalChanges += allChanges.count
+					if !allChanges.isEmpty {
+						try? folder.rescanPaths(SushitrainListOfStrings.from(allChanges))
+					}
+				case .interrupted(let changes, let cursor):
+					Log.info("[NativeScanner] \(folder.folderID): interrupted at \(cursor), \(changes.count) partial")
+					totalChanges += changes.count
+					if !changes.isEmpty {
+						try? folder.rescanPaths(SushitrainListOfStrings.from(changes))
+					}
+				}
+			}
+			return totalChanges
 		}
 	}
 #endif

@@ -57,6 +57,18 @@ func (fld *Folder) RescanSubdirectory(path string) error {
 	return nil
 }
 
+// RescanPaths triggers Syncthing to scan specific paths only (batch API for native scanner)
+func (fld *Folder) RescanPaths(paths *ListOfStrings) error {
+	if paths == nil || paths.Count() == 0 {
+		return nil
+	}
+	go func() {
+		slog.Info("rescan folder paths", "folderID", fld.FolderID, "pathCount", paths.Count())
+		fld.client.app.Internals.ScanFolderSubdirs(fld.FolderID, paths.data)
+	}()
+	return nil
+}
+
 func (fld *Folder) Rescan() error {
 	go func() {
 		slog.Info("rescan", "folder", fld.FolderID)
